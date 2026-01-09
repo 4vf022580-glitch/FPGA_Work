@@ -1,36 +1,97 @@
-module uart_tx #(
-    parameter CLK_FREQ = 100_000_000,
-    parameter BAUD_RATE = 115200
-)(
-    input clk,
-    input rst,          // 修正：统一命名为 rst，高电平复位
-    input [7:0] data_in,
-    input tx_en,
-    output reg tx,
-    output reg ready
-);
-    localparam CYCLE = CLK_FREQ / BAUD_RATE;
-    reg [15:0] cnt;
-    reg [3:0] bit_cnt;
-    reg [7:0] data_reg;
+`timescale 1ns / 1ps
 
-    always @(posedge clk or posedge rst) begin // 修正：适配高电平复位
+//=============================================================================
+// 模块名称：uart_tx
+// 功能描述：通用异步收发传输器 (UART) 发送模块
+//           8数据位 (8 Data Bits), 1停止位 (1 Stop Bit), 无校验位 (No Parity)
+//           支持参数化配置时钟频率和波特率
+//=============================================================================
+
+module uart_tx #(
+    parameter CLK_FREQ  = 100_000_000, // 系统时钟频率 (默认 100MHz)
+    parameter BAUD_RATE = 115200       // 目标波特率
+)(
+    input            clk,      // 系统时钟
+    input            rst,      // 复位信号
+    input      [7:0] data_in,  // 待发送的 8 位并行数据
+    input            tx_en,    // 发送使能信号 (握手信号：请求发送)
+    output reg       tx,       // 串行发送数据线 (Serial Data Output)
+    output reg       ready     // 就绪信号 (1=空闲/准备好，0=正在发送/忙)
+);
+
+    //=========================================================================
+    // 1. 参数计算与寄存器定义
+    //=========================================================================
+    // 计算位周期 (Bit Period)：系统时钟周期数 = 时钟频率 / 波特率
+    // 例如：100M / 115200 ≈ 868 个时钟周期传输 1 bit
+    localparam CYCLE = CLK_FREQ / BAUD_RATE;
+
+    reg [15:0] cnt;      // 波特率分频计数器
+    reg [3:0]  bit_cnt;  // 比特计数器 (记录当前发送到第几位)
+    reg [7:0]  data_reg; // 数据缓存寄存器 (锁存输入数据，保证发送过程稳定)
+
+    //=========================================================================
+    // 2. 主状态机与发送逻辑
+    //=========================================================================
+    // 采用隐式状态机设计：
+    // - 空闲状态 (Idle): ready == 1
+    // - 忙状态 (Busy):   ready == 0
+    
+    always @(posedge clk or posedge rst) begin
+        //---------------------------------------------------------------------
+        // 异步复位逻辑
+        //---------------------------------------------------------------------
         if (rst) begin
-            tx <= 1; cnt <= 0; bit_cnt <= 0; ready <= 1;
-        end else if (ready && tx_en) begin
-            ready <= 0; data_reg <= data_in; cnt <= 0; bit_cnt <= 0;
-        end else if (!ready) begin
+            tx       <= 1'b1;  // UART 空闲状态必须为高电平 (Idle High)
+            cnt      <= 0;
+            bit_cnt  <= 0;
+            ready    <= 1'b1;  // 复位后默认为就绪状态
+        end 
+        
+        //---------------------------------------------------------------------
+        // 握手启动逻辑 (Handshake)
+        //---------------------------------------------------------------------
+        // 当模块空闲 (ready=1) 且收到发送请求 (tx_en=1) 时启动传输
+        else if (ready && tx_en) begin
+            ready    <= 1'b0;      // 拉低 ready，进入忙状态
+            data_reg <= data_in;   // 锁存输入数据
+            cnt      <= 0;         // 清零波特率计数器
+            bit_cnt  <= 0;         // 清零比特计数器 (准备发送起始位)
+        end 
+        
+        //---------------------------------------------------------------------
+        // 数据传输逻辑 (Transmission Loop)
+        //---------------------------------------------------------------------
+        else if (!ready) begin
+            // --- 波特率计时 ---
             if (cnt == CYCLE - 1) begin
+                // 一个 Bit 的时间结束，准备处理下一位
                 cnt <= 0;
-                if (bit_cnt == 9) ready <= 1;
-                else bit_cnt <= bit_cnt + 1;
-            end else begin
-                cnt <= cnt + 1;
+                
+                // 判断是否发送完一帧 (Start + 8 Data + Stop = 10 bits)
+                // bit_cnt: 0(Start), 1-8(Data), 9(Stop)
+                if (bit_cnt == 9) 
+                    ready <= 1'b1; // 停止位发送完毕，恢复空闲
+                else 
+                    bit_cnt <= bit_cnt + 1; // 移至下一位
+            end 
+            else begin
+                // --- 保持当前状态并输出数据 ---
+                cnt <= cnt + 1; // 继续计时
+                
+                // 根据当前 bit_cnt 决定 tx 输出电平
+                // UART 帧格式: Start(0) -> Data(LSB first) -> Stop(1)
+                
                 case (bit_cnt)
-                    0: tx <= 0; // 起始位
-                    1,2,3,4,5,6,7,8: tx <= data_reg[bit_cnt-1];
-                    9: tx <= 1; // 停止位
-                    default: tx <= 1;
+                    0: tx <= 1'b0; // 【起始位】 Start Bit: 拉低电平
+                    
+                    // 【数据位】 Data Bits: 8位数据，低位先行 (LSB First)
+                    // bit_cnt 为 1 时发送 data_reg[0]，以此类推
+                    1,2,3,4,5,6,7,8: tx <= data_reg[bit_cnt - 1]; 
+                    
+                    9: tx <= 1'b1; // 【停止位】 Stop Bit: 拉高电平，表示结束
+                    
+                    default: tx <= 1'b1; // 默认拉高 (容错)
                 endcase
             end
         end
