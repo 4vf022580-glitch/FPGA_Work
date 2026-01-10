@@ -1,22 +1,46 @@
 module lfsr (
-    input clk,
-    input rst,          // 修正：统一命名为 rst，高电平复位
-    input en,           // 由顶层的 rx_done 驱动
-    output [7:0] data_out
+    //============================================================================
+    // 模块名称: lfsr (Linear Feedback Shift Register)
+    // 功能描述: 8位伪随机数生成器，用于产生流加密的密钥。
+    // 工作原理: 基于异或反馈逻辑，每当串口接收到一个字节，就更新一次密钥。
+    //============================================================================
+    input  wire clk,
+    input  wire rst,         // 系统复位 (Active High)
+    input  wire en,          // 使能信号 (由接收完成信号 done 驱动)
+    output wire [7:0] data_out
 );
     reg [7:0] r_lfsr;
-    wire feedback;
+    wire      feedback;
+
+    //============================================================================
+    // 反馈逻辑 (Feedback Logic)
+    //============================================================================
+    // 依据数学上的“本原多项式”选取抽头 (Taps): x^8 + x^6 + x^5 + x^4 + 1
+    // 选取第 7, 5, 4, 3 位进行异或。
+    // 目的：保证生成的随机序列最长 (Maximal Length)，周期为 255。
+    // 如果乱选抽头，随机数可能会在很短的周期内重复。
     
-    // 8位 LFSR 的标准多项式反馈逻辑
     assign feedback = r_lfsr[7] ^ r_lfsr[5] ^ r_lfsr[4] ^ r_lfsr[3];
 
-    always @(posedge clk or posedge rst) begin // 修正：适配高电平复位
+    //============================================================================
+    // 移位寄存器控制 (Shift Register Control)
+    //============================================================================
+    always @(posedge clk or posedge rst) begin
         if (rst) begin
-            r_lfsr <= 8'hFF; // 初始种子，禁止为全0
+            // --- 死锁预防 (Deadlock Prevention) ---
+            // 注意：初始值绝对不能为 0 (0x00)！
+            // 如果寄存器全为 0，异或反馈结果永远是 0，系统会彻底卡死。
+            // 这里给一个非零种子 (Seed)，例如 0xFF。
+            r_lfsr <= 8'hFF; 
         end
-        else if (en) begin  // 只有在接收到一个完整字节（rx_done）时才更新密钥
+        else if (en) begin
+            // --- 移位更新 ---
+            // 只有当外部模块接收完数据 (en=1) 时才更新密钥，实现“一字一密”。
+            // 逻辑：整体左移一位，并将反馈值填入最低位 (LSB)。
             r_lfsr <= {r_lfsr[6:0], feedback};
         end
     end
+
     assign data_out = r_lfsr;
+
 endmodule
