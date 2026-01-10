@@ -1,18 +1,30 @@
+`timescale 1ns / 1ps
+
+//=============================================================================
+// Module:      alu
+// Description: Standard Arithmetic Logic Unit
+//              Performs Add, Sub, And, Or, etc. based on ALU_Control
+//=============================================================================
+
 module alu(
-    input [3:0] a,
-    input [3:0] b,
-    input [1:0] op,
-    output reg [3:0] out // 在 always 块里赋值必须定义为 reg
+    input  [31:0] A,          // 输入操作数 A (根据需要改成 4位 或 1位)
+    input  [31:0] B,          // 输入操作数 B
+    input  [3:0]  ALU_Control,// 控制信号
+    output reg [31:0] Result, // 计算结果
+    output        Zero        // 零标志位 (Result == 0 时为 1)
 );
 
     always @(*) begin
-        case(op)
-            2'b00: out = a + b; // 加法
-            2'b01: out = a - b; // 减法
-            2'b10: out = a & b; // 按位与
-            2'b11: out = a | b; // 按位或
-            default: out = 4'b0000;
+        case (ALU_Control)
+            4'b0000: Result = A & B;       // AND
+            4'b0001: Result = A | B;       // OR
+            4'b0010: Result = A + B;       // ADD
+            4'b0110: Result = A - B;       // SUB
+            4'b0111: Result = A < B ? 1 : 0; // SLT (Set Less Than)
+            default: Result = 32'b0;
         endcase
     end
+
+    assign Zero = (Result == 0);
 
 endmodule

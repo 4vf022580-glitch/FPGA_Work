@@ -1,63 +1,84 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 2025/12/29 14:53:03
-// Design Name: 
-// Module Name: alu_chain
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
+//================================================================================
+// Module Name:    alu_chain
+// Description:    4级 ALU 级联链路 (4-Stage ALU Daisy Chain)
+//                 实现数据的连续处理：Result = (((Head op d1) op d2) op d3) op d4
+//
+// Architecture:   Cascaded Combinational Logic (级联组合逻辑)
+//                 Head -> [ALU1] -> Link1 -> [ALU2] -> Link2 -> [ALU3] -> Link3 -> [ALU4] -> Final
+//
+// Critical Path:  注意：这是一个纯组合逻辑链。
+//                 总延迟 (Total Delay) = 4 * T_alu。
+//                 在高速设计中，这种长逻辑路径可能导致时序违例，通常需要插入流水线寄存器。
+//================================================================================
 
 module alu_chain(
-input [3:0] head_data,
-input [3:0] d1,
-input [3:0] d2,
-input [3:0] d3,
-input [3:0] d4,
-input [1:0] op,
-output [3:0] final_result
-    );
+    // 数据通路输入 (Data Path Inputs)
+    input  wire [3:0] head_data,   // 链头初始数据
+    input  wire [3:0] d1,          // 第1级操作数
+    input  wire [3:0] d2,          // 第2级操作数
+    input  wire [3:0] d3,          // 第3级操作数
+    input  wire [3:0] d4,          // 第4级操作数
+    
+    // 控制信号 (Control Signal)
+    input  wire [1:0] op,          // 全局操作码 (所有 ALU 共用)
+    
+    // 最终输出
+    output wire [3:0] final_result // 累积运算结果
+);
+
+    //----------------------------------------------------------------------------
+    // 内部互联线 (Internal Interconnects)
+    //----------------------------------------------------------------------------
+    // 用于连接各级 ALU 的中间节点 (Intermediate Nodes)
     wire [3:0] link_1;
     wire [3:0] link_2;
     wire [3:0] link_3;
+
+    //============================================================================
+    // Stage 1: 初始处理
+    //============================================================================
+    // 计算: head_data OP d1
     
     alu alu_1(
-    .a (head_data),
-    .b (d1),
-    .op (op),
-    .out (link_1)
+        .a   (head_data),
+        .b   (d1),
+        .op  (op),
+        .out (link_1)    // 输出传给下一级
     );
     
+    //============================================================================
+    // Stage 2: 累积计算
+    //============================================================================
+    // 计算: link_1 OP d2
     alu alu_2(
-    .a (link_1),
-    .b (d2),
-    .op (op),
-    .out (link_2)
+        .a   (link_1),   // 输入来自上一级
+        .b   (d2),
+        .op  (op),
+        .out (link_2)
     );
     
+    //============================================================================
+    // Stage 3: 累积计算
+    //============================================================================
+    // 计算: link_2 OP d3
     alu alu_3(
-    .a (link_2),
-    .b (d3),
-    .op (op),
-    .out (link_3)
+        .a   (link_2),
+        .b   (d3),
+        .op  (op),
+        .out (link_3)
     );
     
+    //============================================================================
+    // Stage 4: 最终计算
+    //============================================================================
+    // 计算: link_3 OP d4
     alu alu_4(
-    .a (link_3),
-    .b (d4),
-    .op (op),
-    .out (final_result)
+        .a   (link_3),
+        .b   (d4),
+        .op  (op),
+        .out (final_result) // 输出最终结果
     );
+
 endmodule
