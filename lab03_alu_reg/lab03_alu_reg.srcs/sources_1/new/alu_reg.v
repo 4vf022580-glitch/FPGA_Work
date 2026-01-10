@@ -1,47 +1,49 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 2025/12/29 20:57:51
-// Design Name: 
-// Module Name: alu_reg
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
+//================================================================================
+// Module Name:    alu_reg
+// Description:    寄存器化 ALU (Registered ALU)
+//                 将纯组合逻辑的 ALU 与 D 触发器级联。
+//
+// Design Intent:  1. 时序优化: 切断组合逻辑的长路径，提高系统运行频率。
+//                 2. 信号去毛刺: ALU 的运算过程会产生中间态毛刺，DFF 采样后
+//                    输出干净、稳定的同步信号。
+//================================================================================
 
 module alu_reg(
-input clk,
-input rst,
-input [3:0] a,
-input [3:0] b,
-input [1:0] op,
-output [3:0] out
-    );
+    input  wire       clk,  // 系统时钟
+    input  wire       rst,  // 同步复位 (配合 dff 模块)
+    input  wire [3:0] a,    // 操作数 A
+    input  wire [3:0] b,    // 操作数 B
+    input  wire [1:0] op,   // 操作码
+    output wire [3:0] out   // 计算结果 (已同步)
+);
     
-wire [3:0] alu_res;
+    // 中间连线：连接 ALU 的输出 和 DFF 的输入
+    wire [3:0] alu_res;
 
-alu u_alu(
-.a(a),
-.b(b),
-.op(op),
-.res(alu_res)
-);
+    //============================================================================
+    // 1. 组合逻辑级 (Combinational Logic Stage)
+    //============================================================================
+    // 负责具体的算术/逻辑运算。
+    // 注意：alu_res 可能会在输入变化的瞬间产生毛刺 (Glitch)，这是正常的。
+    alu u_alu(
+        .a   (a),
+        .b   (b),
+        .op  (op),
+        .res (alu_res)
+    );
 
-dff u_dff(
-.d(alu_res),
-.q(out),
-.clk(clk),
-.rst(rst)
-);
+    //============================================================================
+    // 2. 时序逻辑级 (Sequential Logic Stage)
+    //============================================================================
+    // 负责在时钟上升沿采样稳定的运算结果。
+    // 输出的 'out' 是完全同步的，没有毛刺，可以直接驱动下一级电路。
+    dff u_dff(
+        .clk (clk),
+        .rst (rst),      // 使用同步复位
+        .d   (alu_res),  // 输入来自 ALU
+        .q   (out)       // 输出到外部
+    );
+
 endmodule
