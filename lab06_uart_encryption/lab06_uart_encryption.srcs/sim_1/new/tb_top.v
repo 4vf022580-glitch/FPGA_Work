@@ -1,72 +1,118 @@
 `timescale 1ns / 1ps
 
+//================================================================================
+// Module Name:    tb_top
+// Description:    系统级仿真测试平台 (System Testbench)
+//                 模拟 PC 端发送串口数据，验证 FPGA 的接收、加密及回传逻辑。
+//
+// Test Case:      1. 发送 0x55 (加密模式) -> 预期接收密文
+//                 2. 发送 0x55 (透传模式) -> 预期接收原文
+//================================================================================
+
 module tb_top;
 
-    // 1. 信号定义：对齐硬件逻辑极性
+    //----------------------------------------------------------------------------
+    // 1. 仿真信号定义 (Test Signals)
+    //----------------------------------------------------------------------------
+    // 输入信号 (模拟外部激励)
     reg clk;
-    reg rst;            // 高电平复位信号
-    reg rx_line;        // 模拟串口输入 (PC -> FPGA)
-    reg sw_encrypt;     // 加密开关
-    wire tx_line;       // 观测串口输出 (FPGA -> PC)
+    reg rst;            // 高电平复位 (Active High)
+    reg rx_line;        // 模拟 PC 发送引脚 (PC TX -> FPGA RX)
+    reg sw_encrypt;     // 加密模式开关
+    
+    // 输出信号 (观测 FPGA 响应)
+    wire tx_line;       // 观测 FPGA 发送引脚 (FPGA TX -> PC RX)
+    wire [3:0] an;      // 观测数码管位选
+    wire [6:0] seg;     // 观测数码管段选
 
-    // 位周期计算：100,000,000 / 115200 ≈ 8680 ns
+    //----------------------------------------------------------------------------
+    // 参数计算 (Parameters)
+    //----------------------------------------------------------------------------
+    // 计算 115200 波特率下的位宽：1,000,000,000ns / 115200 ≈ 8680ns
+    // 用于 task 中精准控制发送时序
     localparam BIT_PERIOD = 8680; 
 
-    // 2. 模块实例化：对齐修正后的端口名
+    //----------------------------------------------------------------------------
+    // 2. 待测模块实例化 (DUT Instantiation)
+    //----------------------------------------------------------------------------
     top uut (
-        .clk(clk),
-        .rst(rst),          // 修正：对齐 top.v 的 input rst
-        .rx_line(rx_line),
-        .sw_encrypt(sw_encrypt),
-        .tx_line(tx_line)
+        .clk        (clk),
+        .rst        (rst),
+        .rx_line    (rx_line),
+        .sw_encrypt (sw_encrypt),
+        .tx_line    (tx_line),
+        // 补全数码管接口，避免端口不匹配报错
+        .an         (an),
+        .seg        (seg)
     );
 
-    // 3. 时钟生成：修正为 100MHz (周期 10ns)
+    //----------------------------------------------------------------------------
+    // 3. 时钟生成 (Clock Generation)
+    //----------------------------------------------------------------------------
+    // 产生 100MHz 系统时钟 (周期 10ns)
     initial begin
         clk = 0;
-        forever #5 clk = ~clk; // 半周期 5ns -> 100MHz
+        forever #5 clk = ~clk; // 每 5ns 翻转一次
     end
 
-    // 4. 发送任务 (UART Send Task)
+    //----------------------------------------------------------------------------
+    // 4. 行为级模型：UART 发送任务 (Behavioral Model)
+    //----------------------------------------------------------------------------
+    // 软件模拟 PC 端的串口发送行为 (不综合，仅用于仿真)
+    // 格式：1起始位(0) + 8数据位 + 1停止位(1)
     task send_byte(input [7:0] data);
         integer i;
         begin
-            rx_line = 0; #(BIT_PERIOD); // 起始位
+            // 发送起始位 (Start Bit)
+            rx_line = 0; 
+            #(BIT_PERIOD); 
+            
+            // 逐位发送数据 (LSB First)
             for (i = 0; i < 8; i = i + 1) begin
-                rx_line = data[i]; #(BIT_PERIOD); // 数据位
+                rx_line = data[i]; 
+                #(BIT_PERIOD); 
             end
-            rx_line = 1; #(BIT_PERIOD); // 停止位
+            
+            // 发送停止位 (Stop Bit)
+            rx_line = 1; 
+            #(BIT_PERIOD); 
         end
     endtask
 
-    // 5. 主测试流程
+    //----------------------------------------------------------------------------
+    // 5. 主测试脚本 (Main Test Scenario)
+    //----------------------------------------------------------------------------
     initial begin
-        // --- 初始化状态 ---
-        rst = 1;        // 开始复位 (Basys3 按钮按下状态)
-        rx_line = 1;    // 串口空闲位为 1
-        sw_encrypt = 1; // 开启加密模式
+        // --- 上电初始化 (Power-on Init) ---
+        rst = 1;        // 按下复位键
+        rx_line = 1;    // 串口空闲态必须为高电平
+        sw_encrypt = 1; // 默认开启加密模式
         
-        // --- 释放复位 ---
+        // --- 复位释放 (Reset Release) ---
         #200;
-        rst = 0;        // 释放复位 (Basys3 按钮松开，逻辑启动)
+        rst = 0;        // 松开复位键，系统开始工作
         #2000;
 
-        // --- 测试用例 1: 加密模式发送 ---
-        $display("Sending 0x55 in Encrypt Mode...");
+        // --- 测试用例 1: 加密模式 (Encryption Test) ---
+        // 预期行为：FPGA 收到 0x55 后，数码管显示密钥，TX 返回密文
+        $display("Status: Sending 0x55 in Encrypt Mode...");
         send_byte(8'h55);
         
-        // 等待接收完成（115200波特率下至少需100us以上）
+        // 等待接收和处理完成
+        // 发送一个字节约需 86us，这里给 200us 裕量
         #200000; 
         
-        // --- 测试用例 2: 直通模式发送 ---
+        // --- 测试用例 2: 透传模式 (Bypass Test) ---
+        // 切换开关，验证数据是否原样返回
         sw_encrypt = 0; 
         #1000;
-        $display("Sending 0x55 in Bypass Mode...");
+        $display("Status: Sending 0x55 in Bypass Mode...");
         send_byte(8'h55);
         
+        // --- 仿真结束 ---
         #200000;
-        $display("Simulation Finished.");
-        $stop;
+        $display("Simulation Finished Successfully.");
+        $stop; // 停止仿真
     end
 
 endmodule
